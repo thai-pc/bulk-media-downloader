@@ -28,17 +28,59 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Download ffmpeg (to bundle into the exe)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_tmp -Force
+          $ff = Get-ChildItem -Path ffmpeg_tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $fp = Get-ChildItem -Path ffmpeg_tmp -Recurse -Filter ffprobe.exe | Select-Object -First 1
+          Copy-Item $ff.FullName -Destination ffmpeg.exe
+          Copy-Item $fp.FullName -Destination ffprobe.exe
+          Get-Item ffmpeg.exe, ffprobe.exe | Select-Object Name, Length
+
       - name: Build EXE with PyInstaller
+        # No --collect-submodules PySide6 (that bundles the whole Qt stack,
+        # incl. WebEngine, ~200MB+). PyInstaller's PySide6 hook bundles the
+        # imported modules + platform plugins; we exclude heavy unused Qt modules
+        # to keep the .exe small.
         run: |
           pyinstaller --noconfirm --onefile --windowed --name BulkMediaDownloader `
+            --icon assets/icon.ico `
+            --add-binary "ffmpeg.exe;." `
+            --add-binary "ffprobe.exe;." `
             --collect-all yt_dlp `
             --collect-all gallery_dl `
-            --collect-submodules PySide6 `
+            --exclude-module PySide6.QtWebEngineCore `
+            --exclude-module PySide6.QtWebEngineWidgets `
+            --exclude-module PySide6.QtWebEngineQuick `
+            --exclude-module PySide6.QtQuick `
+            --exclude-module PySide6.QtQuick3D `
+            --exclude-module PySide6.QtQml `
+            --exclude-module PySide6.QtQuickWidgets `
+            --exclude-module PySide6.Qt3DCore `
+            --exclude-module PySide6.Qt3DRender `
+            --exclude-module PySide6.QtCharts `
+            --exclude-module PySide6.QtDataVisualization `
+            --exclude-module PySide6.QtMultimedia `
+            --exclude-module PySide6.QtMultimediaWidgets `
+            --exclude-module PySide6.QtPdf `
+            --exclude-module PySide6.QtPdfWidgets `
+            --exclude-module PySide6.QtDesigner `
+            --exclude-module PySide6.QtHelp `
+            --exclude-module PySide6.QtSql `
+            --exclude-module PySide6.QtTest `
+            --exclude-module PySide6.QtOpenGL `
+            --exclude-module PySide6.QtOpenGLWidgets `
+            --exclude-module tkinter `
             app.py
 
       - name: Smoke-test the EXE
         run: |
           .\dist\BulkMediaDownloader.exe --version
+          "Built exe size:"
+          (Get-Item .\dist\BulkMediaDownloader.exe).Length / 1MB
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4

@@ -7,6 +7,8 @@ venv/
 # PyInstaller build artifacts (regenerate with build.bat)
 /build/
 /dist/
+/dist_exe/
+/exe-out/
 *.spec
 
 # App output

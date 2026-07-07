@@ -227,11 +227,13 @@ class Downloader:
         quality = self.settings.quality
         fmt = _FORMAT_MAP.get(quality, _FORMAT_MAP["best"])
 
-        have_ffmpeg = shutil.which("ffmpeg") is not None
+        ffmpeg_dir = _ffmpeg_location()
+        have_ffmpeg = ffmpeg_dir is not None
         if not have_ffmpeg and not self._ffmpeg_warned:
             logger.warning(
-                "ffmpeg not found on PATH: falling back to a single progressive "
-                "format; video+audio merging and mp3 extraction are unavailable."
+                "ffmpeg not found (not bundled and not on PATH): falling back to a "
+                "single progressive format; video+audio merging and mp3 extraction "
+                "are unavailable."
             )
             self._ffmpeg_warned = True
 
@@ -249,6 +251,11 @@ class Downloader:
             "progress_hooks": [hook],
             "http_headers": self.anti_block.http_headers(),
         }
+
+        if have_ffmpeg:
+            # Point yt-dlp at the located ffmpeg (bundled inside the frozen .exe,
+            # or found on PATH) so merging/extraction works without a PATH install.
+            options["ffmpeg_location"] = ffmpeg_dir
 
         if not have_ffmpeg:
             # Progressive single-file fallback so no merge step is needed.
@@ -401,6 +408,31 @@ def _first_line(text: str) -> str:
         if line:
             return line
     return (text or "").strip()
+
+
+def _ffmpeg_location() -> Optional[str]:
+    """Return a directory containing ffmpeg, or ``None`` if unavailable.
+
+    Order of preference:
+    1. A copy bundled inside a frozen PyInstaller build (onefile extracts to
+       ``sys._MEIPASS``; onedir sits next to the executable).
+    2. ``ffmpeg`` on the system ``PATH``.
+    yt-dlp accepts this as its ``ffmpeg_location`` option.
+    """
+    candidates: list[str] = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(meipass)
+        candidates.append(os.path.dirname(sys.executable))
+    for directory in candidates:
+        for name in ("ffmpeg.exe", "ffmpeg"):
+            if os.path.isfile(os.path.join(directory, name)):
+                return directory
+    found = shutil.which("ffmpeg")
+    if found:
+        return os.path.dirname(found)
+    return None
 
 
 def _is_ip_flag(message: str) -> bool:
