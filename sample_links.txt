@@ -1,0 +1,22 @@
+# Sample URL list for Bulk Media Downloader.
+# One URL per line. Lines starting with '#' and blank lines are ignored.
+# These are public, harmless examples — one per supported platform.
+# (No download is performed just by listing them here.)
+
+# YouTube (Creative Commons sample clip)
+https://www.youtube.com/watch?v=aqz-KE-bpKQ
+
+# TikTok (public profile/video example)
+https://www.tiktok.com/@tiktok/video/7106594312292453675
+
+# Facebook (public video / watch example)
+https://www.facebook.com/watch/?v=10153231379946729
+
+# Instagram (public post example — photo posts route to gallery-dl)
+https://www.instagram.com/p/Ck_example00/
+
+# X / Twitter (public post example)
+https://x.com/Twitter/status/1445078208190291973
+
+# Example of an UNSUPPORTED URL (will be reported FAILED, others still run)
+https://example.com/some/video

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller build artifacts (regenerate with build.bat)
+/build/
+/dist/
+*.spec
+
+# App output
+/downloads/
+*.bmd_checkpoint.json
+bmd.log
+
+# OS junk
+.DS_Store
+Thumbs.db
