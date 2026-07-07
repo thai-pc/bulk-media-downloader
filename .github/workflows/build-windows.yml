@@ -31,14 +31,14 @@ jobs:
       - name: Download ffmpeg (to bundle into the exe)
         shell: pwsh
         run: |
+          # Only ffmpeg.exe is bundled — yt-dlp needs it for merging/extraction.
+          # ffprobe is optional and ~90MB, so we deliberately skip it.
           $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
           Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
           Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_tmp -Force
           $ff = Get-ChildItem -Path ffmpeg_tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
-          $fp = Get-ChildItem -Path ffmpeg_tmp -Recurse -Filter ffprobe.exe | Select-Object -First 1
           Copy-Item $ff.FullName -Destination ffmpeg.exe
-          Copy-Item $fp.FullName -Destination ffprobe.exe
-          Get-Item ffmpeg.exe, ffprobe.exe | Select-Object Name, Length
+          Get-Item ffmpeg.exe | Select-Object Name, Length
 
       - name: Build EXE with PyInstaller
         # No --collect-submodules PySide6 (that bundles the whole Qt stack,
@@ -49,7 +49,6 @@ jobs:
           pyinstaller --noconfirm --onefile --windowed --name BulkMediaDownloader `
             --icon assets/icon.ico `
             --add-binary "ffmpeg.exe;." `
-            --add-binary "ffprobe.exe;." `
             --collect-all yt_dlp `
             --collect-all gallery_dl `
             --exclude-module PySide6.QtWebEngineCore `
