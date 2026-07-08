@@ -524,38 +524,51 @@ class MainWindow(QWidget):
 
         self.queue.start()
         self._running = True
+        self.start_btn.setEnabled(True)
         self._set_start_mode(running=True)
+        # Single authoritative completion detector. Job events can't be trusted
+        # to reset the button: a worker emits its terminal event *before* its
+        # Future resolves, so wait() may still report "not finished" on the last
+        # event and no further event ever arrives. Poll the pool instead.
+        self._watch_completion(self.queue)
 
     def _stop_queue(self) -> None:
         if self.queue:
             self.queue.stop()
         self.start_btn.setEnabled(False)
         self.start_btn.setText("Stopping…")
-        # Re-enable once workers drain; poll cheaply on the GUI thread.
-        self._await_drain()
+        # The watcher started in _start_queue will reset the button once workers
+        # drain — no second watcher needed here.
 
-    def _await_drain(self) -> None:
+    def _watch_completion(self, queue: QueueManager) -> None:
+        """Poll ``queue`` on the GUI thread until every worker has drained."""
         from PySide6.QtCore import QTimer
 
         def check() -> None:
-            if self.queue and self.queue.wait(timeout=0.01):
-                self._running = False
-                self.start_btn.setEnabled(True)
-                self._set_start_mode(running=False)
+            # A newer run may have replaced the queue; let the old watcher die.
+            if self.queue is not queue:
+                return
+            if queue.wait(timeout=0.0):
+                self._on_queue_finished()
             else:
                 QTimer.singleShot(200, check)
 
         QTimer.singleShot(200, check)
 
+    def _on_queue_finished(self) -> None:
+        """Reset the UI to idle once the active queue has fully drained."""
+        self._running = False
+        self.start_btn.setEnabled(True)
+        self._set_start_mode(running=False)
+        self._update_status()
+
     # ----- event slots -----------------------------------------------------
 
     @Slot(object)
     def _on_any_job_update(self, job: Job) -> None:
+        # Status only. Button reset is owned solely by the completion watcher,
+        # because a terminal job event can arrive before its Future resolves.
         self._update_status()
-        if self._running and self.queue and self.queue.wait(timeout=0.0):
-            self._running = False
-            self._set_start_mode(running=False)
-            self.start_btn.setEnabled(True)
 
     def _update_status(self) -> None:
         if not self.queue:
