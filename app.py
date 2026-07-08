@@ -248,10 +248,13 @@ def run_gui(settings: Settings) -> int:
         return 2
 
     from ui.main_window import MainWindow
+    from ui.theme import init_theme
 
     setup_logging(settings, cli_mode=False)
 
     app = QApplication(sys.argv)
+    app.setApplicationName("Bulk Media Downloader")
+    init_theme(app)  # follows the OS scheme on first launch
     window = MainWindow(settings)
     window.show()
     return app.exec()
