@@ -10,6 +10,11 @@ on:
     tags: ["v*"]
   workflow_dispatch: {}   # lets you run it manually from the Actions tab
 
+# The release step needs write access to create a Release and upload the .exe;
+# the default GITHUB_TOKEN is read-only otherwise.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
