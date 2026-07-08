@@ -31,6 +31,44 @@ design and technical spec.
 
 ---
 
+## Download & Install
+
+### Option A — Windows, no Python (recommended for most users)
+
+Grab the prebuilt executable — nothing else to install, `ffmpeg` is already
+bundled inside it.
+
+1. Open the **[latest release](https://github.com/thai-pc/bulk-media-downloader/releases/latest)**.
+2. Under **Assets**, download **`BulkMediaDownloader.exe`** (~119 MB, Windows x64).
+3. Double-click it to launch. On first run the app follows your Windows
+   light/dark theme; toggle it any time from the header.
+
+> **SmartScreen warning?** The build isn't code-signed, so Windows may show
+> *"Windows protected your PC."* Click **More info → Run anyway**. You can verify
+> the download against the SHA-256 printed on the release page.
+
+> **Tip:** keep the `.exe` in its own folder — downloads default to a
+> `downloads/` subfolder and a `bmd.log` is written next to your output.
+
+### Option B — Run from source (any OS / developers)
+
+Requires **Python 3.11+**. See [Requirements](#requirements) for `ffmpeg`.
+
+```bash
+git clone https://github.com/thai-pc/bulk-media-downloader.git
+cd bulk-media-downloader
+python -m venv .venv
+# Windows:  .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+python app.py            # GUI
+```
+
+Prefer building your own `.exe`? See
+[Build a Windows `.exe`](#build-a-windows-exe-pyinstaller) below.
+
+---
+
 ## Requirements
 
 - **Python 3.11+**
@@ -188,7 +226,8 @@ bulk-media-downloader/
 │   └── config.py          # Settings dataclass + load/save
 ├── ui/                    # PySide6 GUI (imported only in GUI mode)
 │   ├── main_window.py
-│   └── settings_dialog.py
+│   ├── settings_dialog.py
+│   └── theme.py           # Light/dark QSS themes + OS-follow
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── build.bat
