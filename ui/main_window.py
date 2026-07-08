@@ -13,13 +13,14 @@ import logging
 import os
 
 from PySide6.QtCore import (
-    QAbstractTableModel, QModelIndex, QObject, Qt, Signal, Slot,
+    QAbstractTableModel, QModelIndex, QObject, QRectF, Qt, Signal, Slot,
 )
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QFileDialog, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QSpinBox, QStyledItemDelegate, QStyleOptionProgressBar,
-    QStyle, QTableView, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QFileDialog, QFrame,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+    QPushButton, QSpinBox, QStyledItemDelegate, QTableView, QVBoxLayout,
+    QWidget,
 )
 
 from core.anti_block import AntiBlock
@@ -29,6 +30,7 @@ from core.downloader import Downloader
 from core.queue_manager import (
     Job, JobStatus, QueueManager, QueueSummary, copy_job,
 )
+from ui import theme
 from ui.settings_dialog import SettingsDialog
 
 logger = logging.getLogger(__name__)
@@ -127,23 +129,55 @@ class JobsTableModel(QAbstractTableModel):
 
 
 class ProgressBarDelegate(QStyledItemDelegate):
-    """Draws a progress bar in the Progress column."""
+    """Draws a rounded progress pill; colours follow the live theme palette."""
 
     def paint(self, painter, option, index):
         progress = index.data(Qt.DisplayRole)
         try:
-            value = int(float(progress))
+            value = max(0, min(100, int(float(progress))))
         except (TypeError, ValueError):
             value = 0
-        bar = QStyleOptionProgressBar()
-        bar.rect = option.rect.adjusted(2, 2, -2, -2)
-        bar.minimum = 0
-        bar.maximum = 100
-        bar.progress = max(0, min(100, value))
-        bar.text = f"{bar.progress}%"
-        bar.textVisible = True
-        QApplication.style().drawControl(
-            QStyle.CE_ProgressBar, bar, painter)
+
+        p = theme.palette()
+        rect = QRectF(option.rect).adjusted(6, 7, -6, -7)
+        radius = rect.height() / 2
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        # Track
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(p["TRACK"]))
+        painter.drawRoundedRect(rect, radius, radius)
+
+        # Fill
+        if value > 0:
+            fill = QRectF(rect)
+            fill.setWidth(rect.width() * value / 100.0)
+            colour = p["DONE"] if value >= 100 else p["ACCENT"]
+            painter.setBrush(QColor(colour))
+            painter.drawRoundedRect(fill, radius, radius)
+
+        # Centred percentage label. Use white over the coloured fill once it is
+        # wide enough to sit under the text, otherwise the muted body text.
+        painter.setPen(QColor("#ffffff") if value >= 45 else QColor(p["TEXT"]))
+        painter.drawText(option.rect, Qt.AlignCenter, f"{value}%")
+        painter.restore()
+
+
+def _card() -> QFrame:
+    """A bordered, rounded surface used to group related controls."""
+    frame = QFrame()
+    frame.setObjectName("card")
+    return frame
+
+
+def _divider() -> QFrame:
+    """A thin vertical separator for the config row (styled via QSS)."""
+    line = QFrame()
+    line.setObjectName("vDivider")
+    line.setFixedWidth(1)
+    return line
 
 
 class MainWindow(QWidget):
@@ -157,56 +191,108 @@ class MainWindow(QWidget):
         self._running = False
 
         self.setWindowTitle("Bulk Media Downloader")
-        self.resize(900, 620)
+        self.setObjectName("root")
+        self.resize(960, 680)
+        self.setMinimumSize(720, 560)
         self._build_ui()
 
         self.bridge.job_updated.connect(self.model.update_job)
         self.bridge.job_updated.connect(self._on_any_job_update)
 
+        # Live-follow the OS colour scheme while the user hasn't pinned a choice.
+        self._subscribe_os_theme()
+
+    def _subscribe_os_theme(self) -> None:
+        """Connect to the OS colour-scheme signal (Qt 6.5+); no-op if absent."""
+        app = QApplication.instance()
+        if app is None:
+            return
+        try:
+            app.styleHints().colorSchemeChanged.connect(self._on_os_theme_changed)
+        except (AttributeError, RuntimeError):  # pragma: no cover - older Qt
+            pass
+
     # ----- UI construction -------------------------------------------------
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
 
-        # 1. Header row
+        # 1. Header row -----------------------------------------------------
         header = QHBoxLayout()
-        header.addWidget(QLabel("<b>Bulk Media Downloader</b>"))
+        title_box = QVBoxLayout()
+        title_box.setSpacing(1)
+        title = QLabel("Bulk Media Downloader")
+        title.setObjectName("appTitle")
+        subtitle = QLabel("YouTube · Facebook · Instagram · TikTok · X")
+        subtitle.setObjectName("appSubtitle")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header.addLayout(title_box)
         header.addStretch(1)
-        settings_btn = QPushButton("⚙ Settings")
+        self.theme_btn = QPushButton()
+        self.theme_btn.setObjectName("ghostButton")
+        self.theme_btn.setCursor(Qt.PointingHandCursor)
+        self.theme_btn.setToolTip("Switch between light and dark mode")
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        self._refresh_theme_button()
+        header.addWidget(self.theme_btn, 0, Qt.AlignTop)
+        settings_btn = QPushButton("⚙  Settings")
+        settings_btn.setObjectName("ghostButton")
+        settings_btn.setCursor(Qt.PointingHandCursor)
         settings_btn.clicked.connect(self._open_settings)
-        header.addWidget(settings_btn)
+        header.addWidget(settings_btn, 0, Qt.AlignTop)
         layout.addLayout(header)
 
-        # 2. URL input area
+        # 2. URL input card -------------------------------------------------
+        url_card = _card()
+        url_lay = QVBoxLayout(url_card)
+        url_lay.setContentsMargins(16, 14, 16, 16)
+        url_lay.setSpacing(10)
+
         url_row = QHBoxLayout()
-        url_row.addWidget(QLabel("Paste URLs (one per line):"))
+        url_label = QLabel("Links")
+        url_label.setObjectName("sectionLabel")
+        url_row.addWidget(url_label)
         url_row.addStretch(1)
-        import_btn = QPushButton("📂 Import from file…")
+        import_btn = QPushButton("📂  Import from file…")
+        import_btn.setCursor(Qt.PointingHandCursor)
         import_btn.clicked.connect(self._import_file)
         url_row.addWidget(import_btn)
-        layout.addLayout(url_row)
+        url_lay.addLayout(url_row)
 
         self.url_input = QPlainTextEdit()
-        self.url_input.setPlaceholderText("https://youtube.com/watch?v=…")
-        self.url_input.setFixedHeight(120)
-        layout.addWidget(self.url_input)
+        self.url_input.setPlaceholderText(
+            "Paste one URL per line…\nhttps://youtube.com/watch?v=…")
+        self.url_input.setFixedHeight(128)
+        url_lay.addWidget(self.url_input)
+        layout.addWidget(url_card)
 
-        # 3. Config row
-        config = QHBoxLayout()
-        config.addWidget(QLabel("Save to:"))
+        # 3. Config card ----------------------------------------------------
+        config_card = _card()
+        config = QHBoxLayout(config_card)
+        config.setContentsMargins(16, 12, 16, 12)
+        config.setSpacing(10)
+
+        config.addWidget(QLabel("Save to"))
         self.output_edit = QLineEdit(self.settings.output_dir)
         config.addWidget(self.output_edit, 1)
         browse_btn = QPushButton("Browse…")
+        browse_btn.setCursor(Qt.PointingHandCursor)
         browse_btn.clicked.connect(self._browse_output)
         config.addWidget(browse_btn)
 
-        config.addWidget(QLabel("Threads:"))
+        config.addWidget(_divider())
+
+        config.addWidget(QLabel("Threads"))
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, 16)
         self.threads_spin.setValue(self.settings.threads)
         config.addWidget(self.threads_spin)
 
-        self.cookies_btn = QPushButton("Cookies: Choose…")
+        self.cookies_btn = QPushButton("🍪  Cookies…")
+        self.cookies_btn.setCursor(Qt.PointingHandCursor)
         self.cookies_btn.clicked.connect(self._choose_cookies)
         config.addWidget(self.cookies_btn)
 
@@ -217,35 +303,110 @@ class MainWindow(QWidget):
             "Rotate through free public proxies (unreliable/slow; see README). "
             "Configure sources & health-check in Settings.")
         config.addWidget(self.proxy_check)
-        layout.addLayout(config)
+        layout.addWidget(config_card)
 
-        # 4. Action row
-        self.start_btn = QPushButton("▶ START DOWNLOAD")
+        # 4. Primary action -------------------------------------------------
+        self.start_btn = QPushButton("▶   START DOWNLOAD")
+        self.start_btn.setObjectName("primaryButton")
+        self.start_btn.setCursor(Qt.PointingHandCursor)
+        self.start_btn.setMinimumHeight(46)
         self.start_btn.clicked.connect(self._toggle_start)
         layout.addWidget(self.start_btn)
 
-        # 5. Jobs table
+        # 5. Jobs table -----------------------------------------------------
         self.model = JobsTableModel()
         self.table = QTableView()
         self.table.setModel(self.model)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(38)
         self.table.setItemDelegateForColumn(4, ProgressBarDelegate(self.table))
         header_view = self.table.horizontalHeader()
+        header_view.setHighlightSections(False)
         header_view.setSectionResizeMode(2, QHeaderView.Stretch)
         layout.addWidget(self.table, 1)
 
-        # 6. Status bar
+        # 6. Status bar -----------------------------------------------------
         status = QHBoxLayout()
-        self.status_label = QLabel("Total: 0 | Done: 0 | Failed: 0 | Left: 0")
+        self.status_label = QLabel("Total: 0   ·   Done: 0   ·   Failed: 0   ·   Left: 0")
+        self.status_label.setProperty("muted", "true")
         status.addWidget(self.status_label)
         status.addStretch(1)
-        export_btn = QPushButton("Export log…")
+        export_btn = QPushButton("⬇  Export log…")
+        export_btn.setObjectName("ghostButton")
+        export_btn.setCursor(Qt.PointingHandCursor)
         export_btn.clicked.connect(self._export_log)
         status.addWidget(export_btn)
         layout.addLayout(status)
 
     # ----- settings & config helpers --------------------------------------
+
+    def _refresh_theme_button(self) -> None:
+        """Label the toggle with the mode it will switch *to*."""
+        if theme.current_mode() == "dark":
+            self.theme_btn.setText("☀  Light")
+        else:
+            self.theme_btn.setText("🌙  Dark")
+
+    def _apply_mode(self, mode: str) -> None:
+        """Cross-fade the whole window from its current look to ``mode``."""
+        app = QApplication.instance()
+        if app is None:
+            return
+
+        def swap() -> None:
+            theme.apply(app, mode)
+            self._refresh_theme_button()
+            # Reapplying the app stylesheet restyles children; nudge the table so
+            # the hand-painting progress delegate repaints in the new palette.
+            self.table.viewport().update()
+
+        self._fade_swap(swap)
+
+    def _fade_swap(self, apply_fn) -> None:
+        """Snapshot the window, apply ``apply_fn``, then fade the snapshot out."""
+        from PySide6.QtCore import QEasingCurve, QPropertyAnimation
+        from PySide6.QtWidgets import QGraphicsOpacityEffect, QLabel
+
+        snapshot = self.grab()
+        overlay = QLabel(self)
+        overlay.setPixmap(snapshot)
+        overlay.setGeometry(self.rect())
+        overlay.show()
+        overlay.raise_()
+
+        apply_fn()  # switch the theme underneath the frozen snapshot
+
+        effect = QGraphicsOpacityEffect(overlay)
+        overlay.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", self)
+        anim.setDuration(260)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.InOutQuad)
+        anim.finished.connect(overlay.deleteLater)
+        anim.start()
+        self._theme_anim = anim  # keep a reference so it isn't GC'd
+
+    def _toggle_theme(self) -> None:
+        # A manual toggle pins an explicit preference (stops OS-following).
+        target = "light" if theme.current_mode() == "dark" else "dark"
+        theme.set_preference(target)
+        self._apply_mode(target)
+
+    @Slot()
+    def _on_os_theme_changed(self) -> None:
+        """Follow the OS scheme live — only while no manual choice is pinned."""
+        app = QApplication.instance()
+        if app is None or theme.preference() != theme.SYSTEM:
+            return
+        resolved = theme.os_mode(app)
+        if resolved != theme.current_mode():
+            self._apply_mode(resolved)
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self.settings, self)
@@ -321,6 +482,18 @@ class MainWindow(QWidget):
                     "Downloads will use a direct connection.")
         return pool
 
+    def _set_start_mode(self, running: bool) -> None:
+        """Toggle the primary button between the START and STOP appearances."""
+        if running:
+            self.start_btn.setText("■   STOP")
+            self.start_btn.setObjectName("dangerButton")
+        else:
+            self.start_btn.setText("▶   START DOWNLOAD")
+            self.start_btn.setObjectName("primaryButton")
+        # Re-evaluate the stylesheet now that objectName changed.
+        self.start_btn.style().unpolish(self.start_btn)
+        self.start_btn.style().polish(self.start_btn)
+
     def _toggle_start(self) -> None:
         if self._running:
             self._stop_queue()
@@ -351,7 +524,7 @@ class MainWindow(QWidget):
 
         self.queue.start()
         self._running = True
-        self.start_btn.setText("■ STOP")
+        self._set_start_mode(running=True)
 
     def _stop_queue(self) -> None:
         if self.queue:
@@ -368,7 +541,7 @@ class MainWindow(QWidget):
             if self.queue and self.queue.wait(timeout=0.01):
                 self._running = False
                 self.start_btn.setEnabled(True)
-                self.start_btn.setText("▶ START DOWNLOAD")
+                self._set_start_mode(running=False)
             else:
                 QTimer.singleShot(200, check)
 
@@ -381,7 +554,7 @@ class MainWindow(QWidget):
         self._update_status()
         if self._running and self.queue and self.queue.wait(timeout=0.0):
             self._running = False
-            self.start_btn.setText("▶ START DOWNLOAD")
+            self._set_start_mode(running=False)
             self.start_btn.setEnabled(True)
 
     def _update_status(self) -> None:
@@ -389,8 +562,8 @@ class MainWindow(QWidget):
             return
         s: QueueSummary = self.queue.summary()
         self.status_label.setText(
-            f"Total: {s.total} | Done: {s.done} | "
-            f"Failed: {s.failed} | Left: {s.remaining}")
+            f"Total: {s.total}   ·   Done: {s.done}   ·   "
+            f"Failed: {s.failed}   ·   Left: {s.remaining}")
 
     # ----- export ----------------------------------------------------------
 

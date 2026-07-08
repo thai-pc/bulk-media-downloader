@@ -30,6 +30,8 @@ class SettingsDialog(QDialog):
 
     def _build_ui(self) -> None:
         form = QFormLayout()
+        form.setSpacing(10)
+        form.setContentsMargins(4, 4, 4, 4)
 
         self.output_edit = QLineEdit()
         browse_out = QPushButton("Browse…")
@@ -112,6 +114,8 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(16)
         layout.addLayout(form)
         layout.addWidget(buttons)
 
